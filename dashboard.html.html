@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP32 Automation Panel — MQTT</title>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+  :root {
+    --bg:#0d1117;--surface:#161b22;--surface2:#1c2330;--border:#30363d;
+    --accent:#00e5ff;--accent2:#7c3aed;--green:#22c55e;--red:#f87171;
+    --text:#e6edf3;--muted:#8b949e;--r:12px;
+    --font:'Segoe UI',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh;padding-bottom:40px}
+  header{background:linear-gradient(135deg,#0d1117,#1a1040);border-bottom:1px solid var(--border);
+    padding:18px 24px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:10;flex-wrap:wrap}
+  header h1{font-size:1.2rem;font-weight:700;letter-spacing:.05em;color:var(--accent)}
+  header p{font-size:.72rem;color:var(--muted);margin-top:2px}
+  .logo{font-size:26px}
+  .status-badge{margin-left:auto;display:flex;align-items:center;gap:8px;background:var(--surface2);
+    border:1px solid var(--border);border-radius:20px;padding:5px 14px;font-size:.72rem;font-family:monospace}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--red);transition:background .2s}
+  .dot.connected{background:var(--green);box-shadow:0 0 8px var(--green)}
+  .dot.connecting{background:#f59e0b}
+  .cfg-btn{background:var(--surface2);border:1px solid var(--border);color:var(--muted);
+    border-radius:8px;padding:6px 12px;cursor:pointer;font-size:.75rem;font-family:var(--font)}
+  .cfg-btn:hover{color:var(--accent);border-color:var(--accent)}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));
+    gap:18px;padding:22px;max-width:1200px;margin:0 auto}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
+    padding:18px;display:flex;flex-direction:column;gap:14px;transition:border-color .2s}
+  .card:hover{border-color:var(--accent)}
+  .card-title{display:flex;align-items:center;gap:9px;font-size:.85rem;font-weight:600;
+    letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+    border-bottom:1px solid var(--border);padding-bottom:11px}
+  .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:6px 2px}
+  .toggle-label{font-size:.88rem;font-weight:500}
+  .toggle-sub{font-size:.7rem;color:var(--muted);margin-top:2px}
+  .toggle{position:relative;width:50px;height:26px;cursor:pointer}
+  .toggle input{opacity:0;width:0;height:0}
+  .slider{position:absolute;inset:0;background:var(--border);border-radius:26px;transition:background .25s}
+  .slider::before{content:'';position:absolute;width:18px;height:18px;left:4px;top:4px;
+    background:#fff;border-radius:50%;transition:transform .25s}
+  .toggle input:checked+.slider{background:var(--green)}
+  .toggle input:checked+.slider::before{transform:translateX(24px)}
+  .relay .toggle input:checked+.slider{background:var(--accent2)}
+  .sensor-row{display:flex;gap:10px}
+  .sensor-box{flex:1;background:var(--surface2);border:1px solid var(--border);
+    border-radius:8px;padding:12px;text-align:center}
+  .sensor-val{font-size:1.8rem;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums}
+  .sensor-unit{font-size:.9rem;color:var(--muted)}
+  .sensor-lbl{font-size:.68rem;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:.08em}
+  .refresh-btn{display:flex;align-items:center;justify-content:center;gap:7px;
+    background:var(--surface2);border:1px solid var(--border);color:var(--accent);
+    border-radius:8px;padding:9px;cursor:pointer;font-size:.82rem;font-family:var(--font);
+    width:100%;transition:background .2s,border-color .2s}
+  .refresh-btn:hover{background:#1e3040;border-color:var(--accent)}
+  .color-preview{height:76px;border-radius:8px;border:2px solid var(--border);
+    transition:background .15s;display:flex;align-items:center;justify-content:center;
+    font-size:.68rem;color:rgba(255,255,255,.35);letter-spacing:.1em;text-transform:uppercase}
+  .color-sliders{display:flex;flex-direction:column;gap:9px}
+  .color-row{display:flex;align-items:center;gap:9px}
+  .color-row label{width:12px;font-size:.8rem;font-weight:700}
+  label.r{color:#f87171} label.g{color:#4ade80} label.b{color:#60a5fa}
+  .color-row input[type=range]{flex:1;cursor:pointer;accent-color:var(--accent)}
+  .color-row .val{width:30px;text-align:right;font-size:.78rem;color:var(--muted);font-variant-numeric:tabular-nums}
+  .set-btn{background:linear-gradient(135deg,#7c3aed,#4f46e5);color:#fff;border:none;
+    border-radius:8px;padding:10px;cursor:pointer;font-size:.84rem;font-family:var(--font);
+    font-weight:600;width:100%;transition:opacity .2s}
+  .set-btn:hover{opacity:.85}
+  .lcd-screen{background:#1a2e1a;border:3px solid #2e4a2e;border-radius:6px;
+    padding:12px 15px;font-family:'Courier New',monospace;font-size:.88rem;
+    letter-spacing:.1em;color:#b8ff9f;text-shadow:0 0 8px #6aff4a;min-height:56px}
+  .lcd-row{height:21px;overflow:hidden;white-space:pre}
+  .lcd-input{background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+    color:var(--text);font-family:var(--font);font-size:.88rem;padding:9px 13px;
+    width:100%;outline:none;transition:border-color .2s}
+  .lcd-input:focus{border-color:var(--accent)}
+  .send-btn{background:linear-gradient(135deg,#0891b2,#0e7490);color:#fff;border:none;
+    border-radius:8px;padding:10px;cursor:pointer;font-size:.84rem;font-family:var(--font);
+    font-weight:600;width:100%;transition:opacity .2s}
+  .send-btn:hover{opacity:.85}
+  #toast{position:fixed;bottom:22px;right:22px;background:var(--surface2);
+    border:1px solid var(--accent);color:var(--accent);border-radius:10px;
+    padding:9px 16px;font-size:.82rem;opacity:0;transform:translateY(8px);
+    transition:all .3s;pointer-events:none;z-index:100}
+  #toast.show{opacity:1;transform:translateY(0)}
+
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;
+    align-items:center;justify-content:center;z-index:200}
+  .modal-overlay.show{display:flex}
+  .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
+    padding:22px;width:340px;display:flex;flex-direction:column;gap:12px}
+  .modal h2{font-size:1rem;color:var(--accent);margin-bottom:4px}
+  .modal label{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .modal input{background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+    color:var(--text);font-family:var(--font);font-size:.85rem;padding:8px 10px;width:100%}
+  .modal-row{display:flex;flex-direction:column;gap:4px}
+  .modal-actions{display:flex;gap:10px;margin-top:6px}
+  .modal-actions button{flex:1}
+  .cancel-btn{background:var(--surface2);border:1px solid var(--border);color:var(--muted);
+    border-radius:8px;padding:9px;cursor:pointer;font-family:var(--font)}
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">&#9889;</span>
+  <div><h1>AUTOMATION PANEL</h1><p>ESP32 &middot; MQTT / HiveMQ &middot; Live Control</p></div>
+  <button class="cfg-btn" onclick="openCfg()">&#9881; Broker settings</button>
+  <span class="status-badge"><span class="dot" id="dot"></span><span id="status-txt">disconnected</span></span>
+</header>
+<div class="grid">
+
+  <!-- LEDs -->
+  <div class="card">
+    <div class="card-title"><span>&#128161;</span> LED Control</div>
+    <div class="toggle-row">
+      <div><div class="toggle-label">LED 1</div><div class="toggle-sub">cmd/led1</div></div>
+      <label class="toggle"><input type="checkbox" id="led1" onchange="tog('led1',this.checked)"><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <div><div class="toggle-label">LED 2</div><div class="toggle-sub">cmd/led2</div></div>
+      <label class="toggle"><input type="checkbox" id="led2" onchange="tog('led2',this.checked)"><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <div><div class="toggle-label">LED 3</div><div class="toggle-sub">cmd/led3</div></div>
+      <label class="toggle"><input type="checkbox" id="led3" onchange="tog('led3',this.checked)"><span class="slider"></span></label>
+    </div>
+  </div>
+
+  <!-- Sensor -->
+  <div class="card">
+    <div class="card-title"><span>&#127777;&#65039;</span> AHT20 Sensor</div>
+    <div class="sensor-row">
+      <div class="sensor-box">
+        <div class="sensor-val" id="tv">--</div>
+        <div class="sensor-unit">&deg;C</div>
+        <div class="sensor-lbl">Temperature</div>
+      </div>
+      <div class="sensor-box">
+        <div class="sensor-val" id="hv">--</div>
+        <div class="sensor-unit">%</div>
+        <div class="sensor-lbl">Humidity</div>
+      </div>
+    </div>
+    <button class="refresh-btn" onclick="readSensor()">&#128260;&nbsp; Request Reading</button>
+  </div>
+
+  <!-- RGB -->
+  <div class="card">
+    <div class="card-title"><span>&#127912;</span> RGB LED Color</div>
+    <div class="color-preview" id="cprev">RGB LED Preview</div>
+    <div class="color-sliders">
+      <div class="color-row"><label class="r">R</label><input type="range" min="0" max="255" value="0" id="cr" oninput="uprev()"><span class="val" id="crv">0</span></div>
+      <div class="color-row"><label class="g">G</label><input type="range" min="0" max="255" value="0" id="cg" oninput="uprev()"><span class="val" id="cgv">0</span></div>
+      <div class="color-row"><label class="b">B</label><input type="range" min="0" max="255" value="0" id="cb" oninput="uprev()"><span class="val" id="cbv">0</span></div>
+    </div>
+    <button class="set-btn" onclick="setRGB()">&#10024; Apply to RGB LED</button>
+  </div>
+
+  <!-- Relays -->
+  <div class="card relay">
+    <div class="card-title"><span>&#128268;</span> Relay Control</div>
+    <div class="toggle-row">
+      <div><div class="toggle-label">Relay 1</div><div class="toggle-sub">cmd/relay1</div></div>
+      <label class="toggle"><input type="checkbox" id="relay1" onchange="tog('relay1',this.checked)"><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <div><div class="toggle-label">Relay 2</div><div class="toggle-sub">cmd/relay2</div></div>
+      <label class="toggle"><input type="checkbox" id="relay2" onchange="tog('relay2',this.checked)"><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <div><div class="toggle-label">Relay 3</div><div class="toggle-sub">cmd/relay3</div></div>
+      <label class="toggle"><input type="checkbox" id="relay3" onchange="tog('relay3',this.checked)"><span class="slider"></span></label>
+    </div>
+  </div>
+
+  <!-- LCD Text - full width -->
+  <div class="card" style="grid-column:1/-1">
+    <div class="card-title"><span>&#128187;</span> LCD Display</div>
+    <div class="lcd-screen">
+      <div class="lcd-row" id="ll1">ESP32 Ready     </div>
+      <div class="lcd-row" id="ll2">T:-- H:--       </div>
+    </div>
+    <input class="lcd-input" type="text" id="ltxt" maxlength="16"
+           placeholder="Type message for LCD line 1 (max 16 chars)..."
+           onkeydown="if(event.key==='Enter')sendLCD()">
+    <button class="send-btn" onclick="sendLCD()">&#128250; Send to LCD</button>
+  </div>
+
+</div>
+<div id="toast"></div>
+
+<!-- Broker settings modal -->
+<div class="modal-overlay" id="cfgModal">
+  <div class="modal">
+    <h2>HiveMQ Broker Settings</h2>
+    <div class="modal-row"><label>Host (WebSocket URL)</label>
+      <input id="cfgHost" placeholder="wss://xxxx.s1.eu.hivemq.cloud:8884/mqtt"></div>
+    <div class="modal-row"><label>Username</label><input id="cfgUser" placeholder="hivemq-username"></div>
+    <div class="modal-row"><label>Password</label><input id="cfgPass" type="password" placeholder="hivemq-password"></div>
+    <div class="modal-row"><label>Topic base</label><input id="cfgTopic" placeholder="esp32/panel"></div>
+    <div class="modal-actions">
+      <button class="cancel-btn" onclick="closeCfg()">Cancel</button>
+      <button class="set-btn" onclick="saveCfg()">Connect</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Config (persisted in localStorage on the machine running this dashboard) ──
+let cfg = JSON.parse(localStorage.getItem('esp32_mqtt_cfg') || 'null') || {
+  host: 'wss://70fa366f98ab46a0a7e9d7503ca09270.s1.eu.hivemq.cloud:8884/mqtt',
+  user: 'praneeth',
+  pass: 'A1b2c3d4#',
+  topic: 'esp32/panel'
+};
+
+let client = null;
+let TOPIC_STATE, TOPIC_SENSOR, TOPIC_CMD_PREFIX;
+
+function toast(m,t=2200){const e=document.getElementById('toast');e.textContent=m;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),t)}
+
+function setStatus(s){
+  const dot=document.getElementById('dot'), txt=document.getElementById('status-txt');
+  dot.className='dot '+s;
+  txt.textContent=s;
+}
+
+function openCfg(){
+  document.getElementById('cfgHost').value=cfg.host;
+  document.getElementById('cfgUser').value=cfg.user;
+  document.getElementById('cfgPass').value=cfg.pass;
+  document.getElementById('cfgTopic').value=cfg.topic;
+  document.getElementById('cfgModal').classList.add('show');
+}
+function closeCfg(){document.getElementById('cfgModal').classList.remove('show')}
+function saveCfg(){
+  cfg = {
+    host: document.getElementById('cfgHost').value.trim(),
+    user: document.getElementById('cfgUser').value.trim(),
+    pass: document.getElementById('cfgPass').value,
+    topic: document.getElementById('cfgTopic').value.trim() || 'esp32/panel'
+  };
+  localStorage.setItem('esp32_mqtt_cfg', JSON.stringify(cfg));
+  closeCfg();
+  connectMQTT();
+}
+
+function connectMQTT(){
+  if (client) { try { client.end(true); } catch(e){} }
+  TOPIC_STATE = cfg.topic + '/state';
+  TOPIC_SENSOR = cfg.topic + '/sensor';
+  TOPIC_CMD_PREFIX = cfg.topic + '/cmd/';
+
+  setStatus('connecting');
+  client = mqtt.connect(cfg.host, {
+    username: cfg.user,
+    password: cfg.pass,
+    clientId: 'dashboard_' + Math.random().toString(16).slice(2),
+    reconnectPeriod: 4000,
+    connectTimeout: 8000,
+  });
+
+  client.on('connect', () => {
+    setStatus('connected');
+    toast('Connected to broker');
+    client.subscribe([TOPIC_STATE, TOPIC_SENSOR]);
+  });
+  client.on('reconnect', () => setStatus('connecting'));
+  client.on('close', () => setStatus('disconnected'));
+  client.on('error', (e) => { console.error(e); toast('MQTT error — check settings'); });
+
+  client.on('message', (topic, payload) => {
+    const msg = payload.toString();
+    if (topic === TOPIC_STATE) {
+      try { applyState(JSON.parse(msg)); } catch(e){}
+    } else if (topic === TOPIC_SENSOR) {
+      try {
+        const s = JSON.parse(msg);
+        document.getElementById('tv').textContent = s.temp;
+        document.getElementById('hv').textContent = s.humidity;
+      } catch(e){}
+    }
+  });
+}
+
+function publish(key, payload){
+  if (!client || !client.connected) { toast('Not connected to broker'); return; }
+  client.publish(TOPIC_CMD_PREFIX + key, String(payload));
+}
+
+function applyState(s){
+  ['led1','led2','led3','relay1','relay2','relay3'].forEach(k=>{
+    const e=document.getElementById(k); if(e && k in s) e.checked = !!s[k];
+  });
+  if (s.temp !== undefined) document.getElementById('tv').textContent = s.temp;
+  if (s.humidity !== undefined) document.getElementById('hv').textContent = s.humidity;
+  if (s.rgb) {
+    document.getElementById('cr').value = s.rgb.r;
+    document.getElementById('cg').value = s.rgb.g;
+    document.getElementById('cb').value = s.rgb.b;
+    uprev();
+  }
+  setLCDDisplay(s.lcd_text, s.temp, s.humidity);
+}
+
+function tog(k,v){ publish(k, v ? 'ON' : 'OFF'); toast(k.toUpperCase()+(v?' ON':' OFF')); }
+function readSensor(){ publish('sensor', '1'); toast('Requested sensor reading'); }
+function setRGB(){
+  const r=+document.getElementById('cr').value,g=+document.getElementById('cg').value,b=+document.getElementById('cb').value;
+  publish('rgb', JSON.stringify({r,g,b}));
+  toast('RGB set to '+r+','+g+','+b);
+}
+function sendLCD(){
+  const t=document.getElementById('ltxt').value.trim(); if(!t) return;
+  publish('lcd', t);
+  toast('Sent to LCD');
+}
+function uprev(){
+  const r=document.getElementById('cr').value,g=document.getElementById('cg').value,b=document.getElementById('cb').value;
+  document.getElementById('crv').textContent=r;
+  document.getElementById('cgv').textContent=g;
+  document.getElementById('cbv').textContent=b;
+  document.getElementById('cprev').style.background='rgb('+r+','+g+','+b+')';
+}
+function setLCDDisplay(txt,t,h){
+  document.getElementById('ll1').textContent=(txt||'ESP32 Ready').toString().substring(0,16).padEnd(16);
+  document.getElementById('ll2').textContent=('T:'+t+'C H:'+h+'%').substring(0,16).padEnd(16);
+}
+
+// First run: if no host configured yet, pop the settings modal; otherwise connect straight away.
+if (!cfg.host || cfg.host.includes('xxxx')) {
+  openCfg();
+} else {
+  connectMQTT();
+}
+</script>
+</body>
+</html>
